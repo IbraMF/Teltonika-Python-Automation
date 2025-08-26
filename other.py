@@ -247,3 +247,14 @@ def wait_for_router(ip: str, timeout: int = 300, interval: int = 5, skip_first_t
         sleep(interval)
 
     return False
+
+def sim_card_activate(ip, headers, pin):
+    print("-"*20+"\033[1mUnlocking SIM Card\033[0m"+"-"*20)
+    status_url = f"http://{ip}/api/modems/status/1-1"
+    r = requests.get(status_url, headers=headers, verify=False).json()
+    print(r['data']['pinstate'])
+
+    unlock_url = f"http://{ip}/api/modems/1-1/actions/sim_unlock"
+    r = requests.post(unlock_url, headers=headers, json = {"data": {"pin": str(pin)}}, verify=False)
+    print(r.text)
+    r.raise_for_status()
