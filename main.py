@@ -23,8 +23,9 @@ if __name__ == "__main__":
     user = True 
     ac = True 
     portf = True 
+    sim_card = True
     backup = True
-
+    
 
     headers = other.login(ip, username, password, True)
 
@@ -59,5 +60,7 @@ if __name__ == "__main__":
     if portf:
         other.add_port_forwarding(ip, headers, "NAME", ["tcp"], "openvpn", "5000", "192.168.10.2", "5000")
         other.add_port_forwarding(ip, headers, "NAME", ["udp", "tcp"], "openvpn", "443", "192.168.10.3", "443")
+    if sim_card:
+        other.sim_card_activate(ip, headers, SIM_pin)
     if backup:
         other.backup(ip, headers, f"{backup_dir}\\{common_name}.tar.gz", restore=False)   
