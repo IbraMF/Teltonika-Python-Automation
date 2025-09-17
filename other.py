@@ -258,3 +258,79 @@ def sim_card_activate(ip, headers, pin):
     r = requests.post(unlock_url, headers=headers, json = {"data": {"pin": str(pin)}}, verify=False)
     print(r.text)
     r.raise_for_status()
+
+def auto_reboot(ip, headers, enable, retry, timeout):
+    print("-"*20+"\033[1mChanging Auto Reboot Options\033[0m"+"-"*20)
+
+    config_url = f"http://{ip}/api/auto_reboot/ping_wget/config"
+    r = requests.get(config_url, headers=headers)
+    r.raise_for_status()
+
+    id = r.json()['data'][0]['id']
+    data = {"data": [{
+        "id": id,
+        "enable": str(int(enable)),
+        "retry": str(retry),
+        "time_out": str(timeout)
+        }]
+    }
+
+    r = requests.put(config_url, headers=headers, json = data)
+    print(r.text)
+    r.raise_for_status()
+    
+def sms_utilities(ip, headers, enable_list):
+    print("-"*20+"\033[1mChanging SMS Utilities\033[0m"+"-"*20)
+
+    config_url = f"http://{ip}/api/sms_utilities/rules/config"
+    r = requests.get(config_url, headers=headers).json()
+    data = []
+    
+    for option in r['data']:
+        if option['smstext'] in enable_list or enable_list[0] == "all":            
+            data.append({"id": option['id'], "enabled" : "1"})
+        else:
+            data.append({"id": option['id'], "enabled" : "0"})
+
+    r = requests.put(config_url, headers=headers, json = {'data': data})
+    r.raise_for_status()
+    print({"success": "true", "data": enable_list})
+
+def ntp(ip, headers, timezone, client_enable, server_enable, force_servers, interval, operator_sync, timeservers):
+    print("-"*20+"\033[1mChanging NTP Settings\033[0m"+"-"*20)
+
+    client_url = f"http://{ip}/api/date_time/ntp/client/config"
+    server_url = f"http://{ip}/api/date_time/ntp/server/config"
+    timeserver_url = f"http://{ip}/api/date_time/ntp/time_servers/config"
+
+    client_data = {'data': [{
+        'id': 'ntpclient',
+        'zoneName': timezone,
+        'enabled': str(int(client_enable)),
+        'force': str(int(force_servers)),
+        'interval': interval,
+        'sync_enabled': str(int(operator_sync))
+        }]    
+    }
+
+    r = requests.put(client_url, headers=headers, json = client_data)
+    print(r.text)
+    r.raise_for_status()
+
+    server_data = {'data': [{
+        'id': 'general',
+        'enabled': str(int(server_enable))
+        }]
+    }
+
+    r = requests.put(server_url, headers=headers, json = server_data)
+    print(r.text)
+    r.raise_for_status()
+
+    timeserver_data = []
+    for id, value in timeservers.items():
+        timeserver_data.append({'id': id, 'hostname': value })
+
+    r = requests.put(timeserver_url, headers=headers, json={'data': timeserver_data})
+    print(r.text)
+    r.raise_for_status()
