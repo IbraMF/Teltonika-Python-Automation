@@ -1,0 +1,6 @@
+/cert
+__pycache__/
+/backup
+/build
+/dist
+*.spec
