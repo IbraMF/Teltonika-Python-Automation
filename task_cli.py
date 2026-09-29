@@ -80,10 +80,7 @@ class GroupedCheckboxPrompt(CheckboxPrompt):
     def _sync_parent_choices(self) -> None:
         parent_states = {
             SELECT_ALL_KEY: self._all_tasks_selected(),
-            **{
-                group_key: self._group_selected(group_key)
-                for group_key in self.group_task_keys
-            },
+            **{group_key: self._group_selected(group_key) for group_key in self.group_task_keys},
         }
 
         for choice in self.content_control.choices:
@@ -129,6 +126,7 @@ class Task:
 class RuntimeContext:
     conf: dict[str, Any]
     headers: Any
+    current_password: str = ""
 
 
 def get_app_dir() -> Path:
@@ -195,13 +193,17 @@ def load_template_config(template_name: str) -> dict[str, Any]:
     return config
 
 
-def select_task_keys(tasks: list[Task]) -> set[str]:
+def select_task_keys(tasks: list[Task]) -> list[str]:
     task_keys = {task.key for task in tasks}
     basic_offline_keys = {"lan", "update", "root", "user"}
     group_task_keys = {
         BASIC_OFFLINE_GROUP_KEY: basic_offline_keys,
         OTHERS_GROUP_KEY: task_keys - basic_offline_keys,
     }
+    displayed_task_keys = [
+        *[task.key for task in tasks if task.key in group_task_keys[BASIC_OFFLINE_GROUP_KEY]],
+        *[task.key for task in tasks if task.key in group_task_keys[OTHERS_GROUP_KEY]],
+    ]
 
     choices = [
         Choice(value=SELECT_ALL_KEY, name="Seleccionar / deseleccionar todo", enabled=False),
@@ -237,7 +239,8 @@ def select_task_keys(tasks: list[Task]) -> set[str]:
         print("\nSelección de tareas cancelada.")
         raise
 
-    return {key for key in selected if key in task_keys}
+    selected_task_keys = {key for key in selected if key in task_keys}
+    return [key for key in displayed_task_keys if key in selected_task_keys]
 
 
 def ask_error_action(task: Task, error: Exception) -> ErrorAction:
@@ -369,11 +372,11 @@ def build_tasks(ctx: RuntimeContext) -> list[Task]:
 
     def task_lan() -> None:
         ip = other.change_lan(cur["ip"], ctx.headers, exp["ip"], exp["mask"], None)
-        ctx.headers = other.login(ip, cur["username"], cur["password"])
+        ctx.headers = other.login(ip, cur["username"], ctx.current_password)
 
     def task_update() -> None:
         other.update_firmware(exp["ip"], ctx.headers, only_check=False)
-        ctx.headers = other.login(exp["ip"], cur["username"], cur["password"])
+        ctx.headers = other.login(exp["ip"], cur["username"], ctx.current_password)
 
     def task_wireguard() -> None:
         skip_task_if_empty("wg", wg)
@@ -402,7 +405,7 @@ def build_tasks(ctx: RuntimeContext) -> list[Task]:
         openvpn_client.create_instance(ovpn_config["data"], ovpn["common_name"], pathlib.Path(ovpn["cert_dir"]))
 
     def task_root() -> None:
-        other.change_root_passwd(exp["ip"], ctx.headers, cur["password"], exp["password"])
+        ctx.current_password = other.change_root_passwd(exp["ip"], ctx.headers, ctx.current_password, exp["password"])
 
     def task_user() -> None:
         skip_task_if_empty("new_users", new_users)
@@ -515,11 +518,11 @@ def build_tasks(ctx: RuntimeContext) -> list[Task]:
 
     return [
         Task("lan", "LAN", task_lan),
-        Task("update", "Firmware", task_update),
         Task("wireguard", "WireGuard", task_wireguard),
         Task("openvpn", "OpenVPN", task_openvpn),
         Task("root", "Users root password", task_root),
         Task("user", "Users", task_user),
+        Task("update", "Firmware", task_update),
         Task("user_groups", "User groups", task_user_groups),
         Task("access_control", "Access control", task_access_control),
         Task("port_forwarding", "Firewall port forwards", task_port_forwarding),
@@ -543,12 +546,14 @@ def run_configuration_cli(conf: dict[str, Any]) -> None:
     all_tasks = build_tasks(preview_ctx)
 
     selected_keys = select_task_keys(all_tasks)
+    selected_key_set = set(selected_keys)
 
     if not selected_keys:
         print("No se seleccionó ninguna tarea.")
         return
 
-    selected_tasks = [task for task in all_tasks if task.key in selected_keys]
+    task_by_key = {task.key: task for task in all_tasks}
+    selected_tasks = [task_by_key[key] for key in selected_keys]
 
     print("\nTareas seleccionadas:")
     for task in selected_tasks:
@@ -566,17 +571,18 @@ def run_configuration_cli(conf: dict[str, Any]) -> None:
     # Misma lógica que tenías antes:
     # Si se va a cambiar LAN, primero se entra por la IP actual.
     # Si no, se entra por la IP esperada.
-    login_ip_data = cur if "lan" in selected_keys else exp
+    login_ip_data = cur if "lan" in selected_key_set else exp
 
     # Si se va a cambiar root, el primer login usa la contraseña actual.
     # Si no, usa la esperada.
-    login_password_data = cur if "root" in selected_keys else exp
+    login_password_data = cur if "root" in selected_key_set else exp
 
     headers = other.login(login_ip_data["ip"], cur["username"], login_password_data["password"], True)
 
-    ctx = RuntimeContext(conf=conf, headers=headers)
+    ctx = RuntimeContext(conf=conf, headers=headers, current_password=login_password_data["password"])
 
     # Rehacemos las tasks con el contexto real, ya con headers.
-    executable_tasks = [task for task in build_tasks(ctx) if task.key in selected_keys]
+    executable_task_by_key = {task.key: task for task in build_tasks(ctx)}
+    executable_tasks = [executable_task_by_key[key] for key in selected_keys]
 
     run_selected_tasks(executable_tasks)
